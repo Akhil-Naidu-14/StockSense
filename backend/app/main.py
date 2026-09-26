@@ -4,7 +4,22 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import health_router
+from app.routers import (
+    adjustments_router,
+    auth_router,
+    categories_router,
+    dashboard_router,
+    deliveries_router,
+    health_router,
+    inventory_router,
+    ledger_router,
+    locations_router,
+    products_router,
+    receipts_router,
+    reorder_rules_router,
+    transfers_router,
+    warehouses_router,
+)
 # Import all models so SQLAlchemy metadata registers them for table creation
 import app.models  # noqa: F401
 
@@ -45,6 +60,19 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(health_router)
+app.include_router(auth_router)
+app.include_router(categories_router)
+app.include_router(warehouses_router)
+app.include_router(locations_router)
+app.include_router(products_router)
+app.include_router(inventory_router)
+app.include_router(receipts_router)
+app.include_router(deliveries_router)
+app.include_router(transfers_router)
+app.include_router(adjustments_router)
+app.include_router(ledger_router)
+app.include_router(reorder_rules_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/")
