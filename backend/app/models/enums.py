@@ -10,6 +10,7 @@ class ReceiptStatus(str, Enum):
     DRAFT = "DRAFT"
     WAITING = "WAITING"
     RECEIVED = "RECEIVED"
+    DONE = "DONE"
     CANCELED = "CANCELED"
 
 

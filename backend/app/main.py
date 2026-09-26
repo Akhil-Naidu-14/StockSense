@@ -11,6 +11,7 @@ from app.routers import (
     inventory_router,
     locations_router,
     products_router,
+    receipts_router,
     warehouses_router,
 )
 # Import all models so SQLAlchemy metadata registers them for table creation
@@ -59,6 +60,7 @@ app.include_router(warehouses_router)
 app.include_router(locations_router)
 app.include_router(products_router)
 app.include_router(inventory_router)
+app.include_router(receipts_router)
 
 
 @app.get("/")

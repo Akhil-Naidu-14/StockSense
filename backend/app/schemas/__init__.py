@@ -28,6 +28,13 @@ from app.schemas.product import (
     ProductStockResponse,
     ProductUpdate,
 )
+from app.schemas.receipt import (
+    ReceiptCreate,
+    ReceiptItemCreate,
+    ReceiptItemResponse,
+    ReceiptResponse,
+    ReceiptUpdate,
+)
 from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseResponse,
@@ -60,4 +67,9 @@ __all__ = [
     "LocationStockDetail",
     "ProductStockResponse",
     "InventoryStockRead",
+    "ReceiptCreate",
+    "ReceiptUpdate",
+    "ReceiptItemCreate",
+    "ReceiptItemResponse",
+    "ReceiptResponse",
 ]

@@ -306,3 +306,185 @@ Routers and business document workflows (Receipts, Deliveries, Transfers, Adjust
    - Low Stock Condition: $\text{available\_quantity} \le \text{reorder\_level}$
    - Out of Stock Condition: $\text{available\_quantity} \le 0$
 
+---
+
+## Receipts / Incoming Stock (`/api/receipts`)
+
+### Overview & Workflow
+The Receipts API manages incoming stock workflows. All stock increases are executed strictly through the centralized `InventoryService.increase_stock` method during receipt validation.
+
+### Status Lifecycle
+- `DRAFT`: Initial state upon creation. Fully editable. Does not change inventory or create stock ledgers.
+- `DONE`: Final validated state. Immutable. Inventory stock increased by `received_quantity` and RECEIPT stock ledger entry generated. Cannot be edited, validated again, or canceled.
+- `CANCELED`: Terminal canceled state. Cannot be edited or validated. Does not alter inventory stock.
+
+```mermaid
+graph LR
+    DRAFT -->|POST /validate| DONE
+    DRAFT -->|POST /cancel| CANCELED
+```
+
+### Authorization
+- `INVENTORY_MANAGER`: Complete access (create, list, detail, edit draft, validate, cancel).
+- `WAREHOUSE_STAFF`: Complete operational access (create, list, detail, edit draft, validate, cancel).
+- Unauthenticated: Returns `401 Unauthorized`.
+
+---
+
+### 1. Create Receipt
+Creates a new incoming receipt in `DRAFT` status.
+
+- **URL:** `/api/receipts`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Request Body Example
+```json
+{
+  "supplier": "Hyderabad Steel Suppliers",
+  "location_id": 1,
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": "100.0000",
+      "received_quantity": "100.0000"
+    }
+  ]
+}
+```
+
+#### Validation Rules
+- `created_by`: Derived from JWT authenticated user token.
+- `location_id`: Must exist and be active. Associated warehouse must be active.
+- `items`: At least 1 item required. Duplicate products in items list rejected.
+- `quantity`: Must be > 0.
+- `received_quantity`: Must be >= 0 and <= `quantity`.
+
+#### Success Response (201 Created)
+```json
+{
+  "id": 1,
+  "receipt_number": "RCV-20260926-0001",
+  "supplier": "Hyderabad Steel Suppliers",
+  "location_id": 1,
+  "location_name": "Receiving Bay",
+  "warehouse_id": 1,
+  "warehouse_name": "Central Hub",
+  "status": "DRAFT",
+  "created_by": 1,
+  "created_at": "2026-09-26T13:00:00Z",
+  "updated_at": "2026-09-26T13:00:00Z",
+  "items": [
+    {
+      "id": 1,
+      "receipt_id": 1,
+      "product_id": 1,
+      "product_name": "Steel Rods",
+      "sku": "STEEL-001",
+      "quantity": "100.0000",
+      "received_quantity": "100.0000"
+    }
+  ]
+}
+```
+
+---
+
+### 2. List Receipts
+Lists receipts ordered newest first.
+
+- **URL:** `/api/receipts`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+- **Query Parameters:**
+  - `status`: Filter by `DRAFT`, `DONE`, `CANCELED`
+  - `location_id`: Filter by destination location ID
+  - `warehouse_id`: Filter by warehouse ID
+  - `supplier`: Case-insensitive substring match on supplier
+  - `search`: Substring search on `receipt_number` or `supplier`
+  - `created_by`: Filter by creator user ID
+
+#### Success Response (200 OK)
+```json
+[
+  {
+    "id": 1,
+    "receipt_number": "RCV-20260926-0001",
+    "supplier": "Hyderabad Steel Suppliers",
+    "location_id": 1,
+    "location_name": "Receiving Bay",
+    "warehouse_id": 1,
+    "warehouse_name": "Central Hub",
+    "status": "DRAFT",
+    "created_by": 1,
+    "created_at": "2026-09-26T13:00:00Z",
+    "updated_at": "2026-09-26T13:00:00Z",
+    "items": [
+      {
+        "id": 1,
+        "receipt_id": 1,
+        "product_id": 1,
+        "product_name": "Steel Rods",
+        "sku": "STEEL-001",
+        "quantity": "100.0000",
+        "received_quantity": "100.0000"
+      }
+    ]
+  }
+]
+```
+
+---
+
+### 3. Get Receipt Detail
+Retrieves full details of a receipt by ID.
+
+- **URL:** `/api/receipts/{receipt_id}`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+
+---
+
+### 4. Update Receipt (DRAFT only)
+Updates supplier, location, or item lines of a `DRAFT` receipt.
+
+- **URL:** `/api/receipts/{receipt_id}`
+- **Method:** `PATCH`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+---
+
+### 5. Validate Receipt
+Validates a receipt and executes stock increases via `InventoryService.increase_stock` inside a single database transaction.
+
+- **URL:** `/api/receipts/{receipt_id}/validate`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Transaction & Idempotency Behavior
+1. Validates status is `DRAFT`. If already `DONE` or `CANCELED`, returns `400 Bad Request`.
+2. Validates location, warehouse, and all line products are active.
+3. Requires at least one line item to have `received_quantity > 0`.
+4. For each item with `received_quantity > 0`, calls `InventoryService.increase_stock(...)`:
+   - `transaction_type`: `RECEIPT`
+   - `reference_id`: `receipt.id`
+   - `performed_by`: authenticated `current_user.id`
+   - `quantity_change`: `+item.received_quantity`
+5. Sets status to `DONE`.
+6. Commits transaction once. On any failure, full rollback occurs (no stock increase, no ledger created, status remains `DRAFT`).
+
+---
+
+### 6. Cancel Receipt
+Cancels a `DRAFT` receipt.
+
+- **URL:** `/api/receipts/{receipt_id}/cancel`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Behavior
+- Updates status to `CANCELED`.
+- Does not change inventory stock or create stock ledger records.
+- If receipt is already `DONE` or `CANCELED`, returns `400 Bad Request`.
+
+
