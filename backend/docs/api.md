@@ -33,8 +33,8 @@ Authorization: Bearer <access_token>
 
 ### Roles & RBAC
 System operations are restricted based on user roles:
-- `INVENTORY_MANAGER`: Complete administrative and managerial access across warehouses.
-- `WAREHOUSE_STAFF`: Standard operational access for inventory recording and handling.
+- `INVENTORY_MANAGER`: Complete administrative and managerial access across categories, products, warehouses, locations, and inventory.
+- `WAREHOUSE_STAFF`: Read-only access for master data and stock availability queries.
 
 ---
 
@@ -143,7 +143,6 @@ Stateless logout notification endpoint.
   "message": "Logged out successfully. Please discard the access token on the client side."
 }
 ```
-*Note: Because JWT tokens are stateless, clients must discard the stored token from localStorage/sessionStorage upon calling logout.*
 
 ---
 
@@ -167,15 +166,11 @@ Initiates the 6-digit numeric OTP password reset process.
   "message": "If the email is registered, a password reset OTP has been generated."
 }
 ```
-*Note: To prevent account enumeration attacks, a uniform response is returned regardless of whether the email exists in the database.*
-
-#### Development/Test OTP Behavior
-In `development` / `test` environments (`APP_ENV != "production"`), the generated OTP is logged to backend console and stored in `OTPService._dev_otp_store`. Production API responses never leak OTP codes.
 
 ---
 
 ### 6. Verify OTP
-Verifies the 6-digit OTP code and returns a short-lived, single-purpose password reset token.
+Verifies the 6-digit OTP code and returns a short-lived password reset token.
 
 - **URL:** `/api/auth/verify-otp`
 - **Method:** `POST`
@@ -197,7 +192,6 @@ Verifies the 6-digit OTP code and returns a short-lived, single-purpose password
   "message": "OTP verified successfully."
 }
 ```
-*Note: The returned `reset_token` has claim `"type": "password_reset"` and cannot be used as an access token for general API routes.*
 
 ---
 
@@ -222,4 +216,53 @@ Resets user password using the short-lived password reset token.
   "message": "Password has been reset successfully."
 }
 ```
-*Note: Once reset completes, the OTP record is marked as `used=True`, rendering the reset token and OTP single-use.*
+
+---
+
+## Categories (`/api/categories`)
+
+- **POST `/api/categories`**: Create category (`INVENTORY_MANAGER` only). Body: `{"name": "Metals", "description": "Raw metals"}` (201 Created).
+- **GET `/api/categories`**: List categories (Authenticated). Query params: `?search=...`, `?is_active=true`.
+- **GET `/api/categories/{id}`**: Get category details by ID (Authenticated).
+- **PATCH `/api/categories/{id}`**: Update category (`INVENTORY_MANAGER` only). Body: `{"name": "...", "description": "...", "is_active": true}`.
+- **DELETE `/api/categories/{id}`**: Deactivate category (`INVENTORY_MANAGER` only, soft-delete).
+
+---
+
+## Warehouses (`/api/warehouses`)
+
+- **POST `/api/warehouses`**: Create warehouse (`INVENTORY_MANAGER` only). Body: `{"name": "Central Hub", "code": "WH-01", "address": "...", "manager_id": 1}` (201 Created).
+- **GET `/api/warehouses`**: List warehouses (Authenticated). Query params: `?search=...`, `?is_active=true`.
+- **GET `/api/warehouses/{id}`**: Get warehouse details by ID (Authenticated).
+- **PATCH `/api/warehouses/{id}`**: Update warehouse (`INVENTORY_MANAGER` only).
+- **DELETE `/api/warehouses/{id}`**: Deactivate warehouse (`INVENTORY_MANAGER` only, soft-delete).
+
+---
+
+## Locations (`/api/locations`)
+
+- **POST `/api/locations`**: Create location (`INVENTORY_MANAGER` only). Body: `{"warehouse_id": 1, "name": "Aisle A1", "code": "LOC-A1", "location_type": "internal"}` (201 Created).
+- **GET `/api/locations`**: List locations (Authenticated). Query params: `?warehouse_id=1`, `?search=...`, `?is_active=true`.
+- **GET `/api/locations/{id}`**: Get location details by ID (Authenticated).
+- **PATCH `/api/locations/{id}`**: Update location (`INVENTORY_MANAGER` only).
+- **DELETE `/api/locations/{id}`**: Deactivate location (`INVENTORY_MANAGER` only, soft-delete).
+
+---
+
+## Products (`/api/products`)
+
+- **POST `/api/products`**: Create product master (`INVENTORY_MANAGER` only). Body: `{"name": "Steel Bolt", "sku": "SKU-BOLT-01", "category_id": 1, "unit_of_measure": "pcs", "reorder_level": "10.0000", "reorder_quantity": "50.0000"}` (201 Created).
+  *Note: Direct initial stock setup via POST /api/products is deferred to the centralized InventoryService.*
+- **GET `/api/products`**: List products (Authenticated). Query params: `?search=...`, `?sku=...`, `?category_id=1`, `?is_active=true`.
+- **GET `/api/products/{id}`**: Get product by ID (Authenticated).
+- **PATCH `/api/products/{id}`**: Update product (`INVENTORY_MANAGER` only).
+- **DELETE `/api/products/{id}`**: Deactivate product (`INVENTORY_MANAGER` only, soft-delete).
+- **GET `/api/products/{id}/stock`**: Read-only aggregated stock availability across locations for product (Authenticated).
+
+---
+
+## Inventory Availability (Read-Only) (`/api/inventory`)
+
+- **GET `/api/inventory`**: Query read-only stock availability across products, locations, and warehouses (Authenticated).
+  Query params: `?warehouse_id=1`, `?location_id=1`, `?product_id=1`, `?category_id=1`, `?low_stock=true`, `?out_of_stock=true`.
+- **GET `/api/inventory/{product_id}/locations`**: Query location-by-location inventory for a product (Authenticated).
