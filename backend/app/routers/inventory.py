@@ -5,10 +5,72 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.middleware import get_current_active_user
-from app.models import Category, Inventory, Location, Product, User
-from app.schemas.inventory import InventoryStockRead
+from app.models import Category, Inventory, Location, Product, ReorderRule, User
+from app.schemas.inventory import InventoryStockRead, LowStockResponse
 
 router = APIRouter(prefix="/api/inventory", tags=["Inventory (Read-Only)"])
+
+
+def _evaluate_inventory_item(db: Session, inv: Inventory) -> LowStockResponse:
+    prod = inv.product
+    loc = inv.location
+    wh = loc.warehouse if loc else None
+    cat = prod.category if prod else None
+
+    avail = inv.quantity - inv.reserved_quantity
+
+    # 1. Location-specific active ReorderRule
+    rule = (
+        db.query(ReorderRule)
+        .filter(
+            ReorderRule.product_id == inv.product_id,
+            ReorderRule.location_id == inv.location_id,
+            ReorderRule.active.is_(True),
+        )
+        .first()
+    )
+
+    # 2. Product-wide active ReorderRule fallback
+    if not rule:
+        rule = (
+            db.query(ReorderRule)
+            .filter(
+                ReorderRule.product_id == inv.product_id,
+                ReorderRule.location_id.is_(None),
+                ReorderRule.active.is_(True),
+            )
+            .first()
+        )
+
+    if rule:
+        min_qty = rule.minimum_quantity
+        reorder_qty = rule.reorder_quantity
+    else:
+        min_qty = prod.reorder_level if prod else Decimal("0.0000")
+        reorder_qty = prod.reorder_quantity if prod else Decimal("0.0000")
+
+    is_low = avail <= min_qty
+    is_out = avail <= Decimal("0.0000")
+
+    return LowStockResponse(
+        product_id=inv.product_id,
+        product_name=prod.name if prod else "",
+        sku=prod.sku if prod else "",
+        category_id=prod.category_id if prod else None,
+        category_name=cat.name if cat else None,
+        location_id=inv.location_id,
+        location_name=loc.name if loc else "",
+        location_code=loc.code if loc else "",
+        warehouse_id=loc.warehouse_id if loc else 0,
+        warehouse_name=wh.name if wh else "",
+        quantity=inv.quantity,
+        reserved_quantity=inv.reserved_quantity,
+        available_quantity=avail,
+        minimum_quantity=min_qty,
+        reorder_quantity=reorder_qty,
+        is_low_stock=is_low,
+        is_out_of_stock=is_out,
+    )
 
 
 @router.get(
@@ -89,6 +151,101 @@ def list_inventory(
                 updated_at=inv.updated_at,
             )
         )
+
+    return results
+
+
+@router.get(
+    "/low-stock",
+    response_model=List[LowStockResponse],
+    summary="Get low-stock inventory items violating reorder thresholds",
+)
+def get_low_stock_inventory(
+    warehouse_id: Optional[int] = Query(None, description="Filter by warehouse ID"),
+    location_id: Optional[int] = Query(None, description="Filter by location ID"),
+    product_id: Optional[int] = Query(None, description="Filter by product ID"),
+    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Read-only endpoint returning inventory items where available_quantity <= effective reorder threshold.
+    Respects precedence: Location ReorderRule > Product ReorderRule > Product.reorder_level.
+    """
+    query = (
+        db.query(Inventory)
+        .join(Product, Inventory.product_id == Product.id)
+        .join(Location, Inventory.location_id == Location.id)
+        .filter(Product.is_active.is_(True), Location.is_active.is_(True))
+        .options(
+            joinedload(Inventory.product).joinedload(Product.category),
+            joinedload(Inventory.location).joinedload(Location.warehouse),
+        )
+    )
+
+    if warehouse_id is not None:
+        query = query.filter(Location.warehouse_id == warehouse_id)
+    if location_id is not None:
+        query = query.filter(Inventory.location_id == location_id)
+    if product_id is not None:
+        query = query.filter(Inventory.product_id == product_id)
+    if category_id is not None:
+        query = query.filter(Product.category_id == category_id)
+
+    records = query.all()
+    results: List[LowStockResponse] = []
+
+    for inv in records:
+        eval_item = _evaluate_inventory_item(db, inv)
+        if eval_item.is_low_stock:
+            results.append(eval_item)
+
+    return results
+
+
+@router.get(
+    "/out-of-stock",
+    response_model=List[LowStockResponse],
+    summary="Get out-of-stock inventory items (available stock <= 0)",
+)
+def get_out_of_stock_inventory(
+    warehouse_id: Optional[int] = Query(None, description="Filter by warehouse ID"),
+    location_id: Optional[int] = Query(None, description="Filter by location ID"),
+    product_id: Optional[int] = Query(None, description="Filter by product ID"),
+    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Read-only endpoint returning inventory items where available_quantity <= 0.
+    """
+    query = (
+        db.query(Inventory)
+        .join(Product, Inventory.product_id == Product.id)
+        .join(Location, Inventory.location_id == Location.id)
+        .filter(Product.is_active.is_(True), Location.is_active.is_(True))
+        .options(
+            joinedload(Inventory.product).joinedload(Product.category),
+            joinedload(Inventory.location).joinedload(Location.warehouse),
+        )
+    )
+
+    if warehouse_id is not None:
+        query = query.filter(Location.warehouse_id == warehouse_id)
+    if location_id is not None:
+        query = query.filter(Inventory.location_id == location_id)
+    if product_id is not None:
+        query = query.filter(Inventory.product_id == product_id)
+    if category_id is not None:
+        query = query.filter(Product.category_id == category_id)
+
+    records = query.all()
+    results: List[LowStockResponse] = []
+
+    for inv in records:
+        eval_item = _evaluate_inventory_item(db, inv)
+        if eval_item.is_out_of_stock:
+            results.append(eval_item)
 
     return results
 

@@ -801,6 +801,255 @@ Cancels a pre-DONE transfer document (`DRAFT`, `WAITING`, `IN_TRANSIT`).
 - Does not change inventory stock or create stock ledger records.
 - If transfer is already `DONE` or `CANCELED`, returns `400 Bad Request`.
 
+---
+
+## Inventory Adjustments (`/api/adjustments`)
+
+Physical stock count adjustment workflow supporting audit reconciliation and inventory corrections.
+
+### Core Business Rules & Principles:
+1. **Physical Count Recording:** An adjustment records the actual physical counted quantity (`counted_quantity`), NOT an arbitrary delta.
+2. **Difference Arithmetic:** $\text{difference} = \text{counted\_quantity} - \text{system\_quantity}$ (e.g. system 80, counted 77 $\rightarrow$ difference -3, final stock 77).
+3. **Decimal Precision:** All quantities are represented strictly using `Decimal` / `Numeric(12, 4)`.
+4. **Stale Stock Semantics:** At validation time, the system re-reads the live `system_quantity` from inventory and applies the physical counted quantity through `InventoryService.adjust_stock()`. It does not apply a stale draft delta.
+5. **Reservation Safety:** `InventoryService.adjust_stock()` rejects any counted quantity below the location's `reserved_quantity` (e.g. system 100, reserved 30, counted 20 $\rightarrow$ rejected, stock unchanged).
+6. **Centralized Mutation:** Stock mutation and ledger entry creation occur exclusively via `InventoryService.adjust_stock()` during document validation.
+
+---
+
+### 1. Create Adjustment Document
+Creates a new physical stock adjustment in `DRAFT` status.
+
+- **URL:** `/api/adjustments`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Request Body:
+```json
+{
+  "product_id": 1,
+  "location_id": 1,
+  "counted_quantity": 77.0000,
+  "reason": "Annual Warehouse Stock Audit"
+}
+```
+
+#### Response (201 Created):
+```json
+{
+  "id": 1,
+  "product_id": 1,
+  "product_name": "Steel Rods",
+  "sku": "STEEL-001",
+  "location_id": 1,
+  "location_name": "Storage Dock A",
+  "warehouse_id": 1,
+  "warehouse_name": "Main Warehouse",
+  "system_quantity": "80.0000",
+  "counted_quantity": "77.0000",
+  "difference": "-3.0000",
+  "reason": "Annual Warehouse Stock Audit",
+  "status": "DRAFT",
+  "created_by": 1,
+  "created_at": "2026-09-26T16:00:00Z"
+}
+```
+
+#### Operational Behavior:
+- Validates that product, location, and parent warehouse are active.
+- Captures current `system_quantity` for draft view.
+- Does **NOT** mutate stock or create `StockLedger` entries.
+
+---
+
+### 2. List Adjustments
+Lists adjustment documents ordered by newest first with optional filtering.
+
+- **URL:** `/api/adjustments`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+- **Query Parameters:**
+  - `status`: Filter by adjustment status (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `DONE`, `CANCELED`)
+  - `product_id`: Filter by product ID
+  - `location_id`: Filter by location ID
+  - `warehouse_id`: Filter by warehouse ID
+  - `search`: Search product name, SKU, or reason
+  - `created_by`: Filter by creator user ID
+
+---
+
+### 3. Get Adjustment Detail
+Retrieves detailed information for an adjustment document by ID.
+
+- **URL:** `/api/adjustments/{id}`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+
+---
+
+### 4. Update Adjustment (Pre-Validation)
+Updates product, location, counted quantity, reason, or status of a pre-validation adjustment document.
+
+- **URL:** `/api/adjustments/{id}`
+- **Method:** `PATCH`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Operational Rules:
+- Only pre-validation documents can be updated (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`).
+- Direct status changes to `DONE` or `CANCELED` via `PATCH` are rejected (`400 Bad Request`). Use `/validate` or `/cancel`.
+- Terminal statuses (`DONE`, `CANCELED`) are strictly immutable.
+
+---
+
+### 5. Validate Adjustment
+Validates a pre-validation adjustment document, adjusting physical inventory stock to the counted quantity via `InventoryService.adjust_stock()` in a single transaction.
+
+- **URL:** `/api/adjustments/{id}/validate`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Transaction & Concurrency Invariants:
+1. Locks the `Adjustment` row with PostgreSQL-safe row-level lock (`SELECT ... FOR UPDATE`).
+2. Verifies pre-validation status. If `DONE` or `CANCELED`, returns `400 Bad Request`.
+3. Re-validates that product, location, parent warehouse, and counted quantity remain valid and active.
+4. Executes `InventoryService.adjust_stock()`:
+   - Reads live `system_quantity` at validation time.
+   - Enforces $\text{counted\_quantity} \ge \text{reserved\_quantity}$.
+   - Mutates `Inventory.quantity` to `counted_quantity`.
+   - Records an immutable `ADJUSTMENT` `StockLedger` entry ($\text{quantity\_change} = \text{counted\_quantity} - \text{live\_system\_quantity}$).
+5. Updates `system_quantity`, `difference`, and marks status as `DONE`.
+6. Single database commit. If any error occurs (e.g. counted < reserved), complete transaction rollback occurs (stock unchanged, status unchanged, no ledger created).
+
+---
+
+### 6. Cancel Adjustment
+Cancels a pre-DONE adjustment document.
+
+- **URL:** `/api/adjustments/{id}/cancel`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Behavior:
+- Updates status to `CANCELED`.
+- Does not change inventory stock or create stock ledger records.
+- If adjustment is already `DONE` or `CANCELED`, returns `400 Bad Request`.
+
+---
+
+## Stock Ledger & Move History (`/api/ledger`, `/api/move-history`)
+
+Read-only audit history and movement reporting APIs derived directly from the `StockLedger` table (the single source of truth for stock changes).
+
+### 1. Query Stock Ledger Audit Records
+- **URL:** `/api/ledger`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+- **Query Parameters:**
+  - `product_id`: Filter by product ID
+  - `transaction_type`: Filter by transaction type (`INITIAL_STOCK`, `RECEIPT`, `DELIVERY`, `TRANSFER`, `ADJUSTMENT`)
+  - `source_location_id`: Filter by source location ID
+  - `destination_location_id`: Filter by destination location ID
+  - `location_id`: Filter matching either source or destination location ID
+  - `warehouse_id`: Filter matching source or destination location warehouse ID
+  - `performed_by`: Filter by user ID
+  - `reference_id`: Filter by document reference ID
+  - `date_from`: Datetime filter (>=)
+  - `date_to`: Datetime filter (<=)
+  - `limit`: Pagination limit (default 100, max 500)
+  - `offset`: Pagination offset (default 0)
+
+---
+
+### 2. Get Single Stock Ledger Entry
+- **URL:** `/api/ledger/{id}`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+---
+
+### 3. Query Move History
+Returns frontend-friendly movement logs dynamically calculated from `StockLedger`.
+
+- **URL:** `/api/move-history`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+- **Movement Quantity Sign Rules:**
+  - `RECEIPT` / `INITIAL_STOCK`: Positive quantity
+  - `DELIVERY`: Negative quantity
+  - `ADJUSTMENT`: Signed difference ($\text{counted} - \text{system}$)
+  - `TRANSFER`: Moved quantity (single logical TRANSFER representation)
+
+---
+
+## Reorder Rules (`/api/reorder-rules`)
+
+Reorder threshold configuration APIs used for low-stock and replenishment planning.
+
+### 1. Create Reorder Rule
+- **URL:** `/api/reorder-rules`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER` only)
+
+#### Rules:
+- `minimum_quantity >= 0`, `reorder_quantity > 0`.
+- Product and location (if provided) must exist and be active.
+- Duplicate active rules for the same product and location scope are rejected (`409 Conflict`).
+
+---
+
+### 2. List Reorder Rules
+- **URL:** `/api/reorder-rules`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+---
+
+### 3. Get / Update / Deactivate Reorder Rule
+- `GET /api/reorder-rules/{id}`
+- `PATCH /api/reorder-rules/{id}` (`INVENTORY_MANAGER` only)
+- `DELETE /api/reorder-rules/{id}` (`INVENTORY_MANAGER` only - soft deactivates rule)
+
+---
+
+## Low Stock & Out of Stock (`/api/inventory/low-stock`, `/api/inventory/out-of-stock`)
+
+Read-only endpoints evaluating live inventory levels against reorder thresholds.
+
+### Reorder Threshold Precedence:
+1. Active location-specific `ReorderRule`
+2. Active product-wide `ReorderRule`
+3. Default `Product.reorder_level`
+
+### Formulas:
+- $\text{available\_quantity} = \text{quantity} - \text{reserved\_quantity}$
+- **Low Stock:** $\text{available\_quantity} \le \text{effective\_threshold}$
+- **Out of Stock:** $\text{available\_quantity} \le 0$
+
+- **Endpoints:**
+  - `GET /api/inventory/low-stock`
+  - `GET /api/inventory/out-of-stock`
+
+---
+
+## Dashboard KPIs (`/api/dashboard`)
+
+Operational executive summary metrics for warehouse performance and stock health.
+
+- **URL:** `/api/dashboard`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+- **Query Parameters:** `warehouse_id`, `location_id`, `category_id`
+
+#### KPI Definitions:
+- `total_products`: Count of active products
+- `low_stock_items`: Count of inventory rows where $\text{available} \le \text{threshold}$
+- `out_of_stock_items`: Count of inventory rows where $\text{available} \le 0$
+- `pending_receipts`: Count of non-terminal Receipts (`DRAFT`, `WAITING`, `RECEIVED`)
+- `pending_deliveries`: Count of non-terminal Deliveries (`DRAFT`, `WAITING`, `READY`, `PICKED`, `PACKED`)
+- `scheduled_transfers`: Count of non-terminal Transfers (`DRAFT`, `WAITING`, `IN_TRANSIT`)
+
+
+
 
 
 
