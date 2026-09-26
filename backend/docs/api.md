@@ -656,5 +656,151 @@ Cancels a pre-DONE delivery document.
 - Does not change inventory stock or create stock ledger records.
 - If delivery is already `DONE` or `CANCELED`, returns `400 Bad Request`.
 
+---
+
+## Internal Transfers (`/api/transfers`)
+
+### Overview & Transfer Lifecycle
+Internal transfers move stock between concrete source and destination locations.
+Supported statuses: `DRAFT`, `WAITING`, `IN_TRANSIT`, `DONE`, `CANCELED`.
+
+- **Stock Mutation Policy:** DRAFT, WAITING, and IN_TRANSIT documents do NOT mutate inventory stock or create `StockLedger` entries.
+- **Total Stock Conservation:** Transfers shift stock between locations without altering company-wide stock totals.
+- **Reservation Policy:** Transfers do not create or own inventory reservations. Final validation verifies source available stock (`available = quantity - reserved_quantity`).
+- **Validation:** `POST /api/transfers/{id}/validate` requires `status == IN_TRANSIT`, locks the `Transfer` row using `SELECT ... FOR UPDATE`, moves stock atomically via `InventoryService.transfer_stock()`, generates a single `TRANSFER` stock ledger entry per item line, and sets status to `DONE`.
+- **Immutability:** `DONE` and `CANCELED` states are terminal and immutable.
+
+### Operational Roles
+Both `INVENTORY_MANAGER` and `WAREHOUSE_STAFF` roles can create, update, validate, and cancel transfer documents.
+
+---
+
+### 1. Create Transfer
+Creates a new internal transfer document in `DRAFT` status.
+
+- **URL:** `/api/transfers`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Request Body
+```json
+{
+  "source_location_id": 1,
+  "destination_location_id": 2,
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": "15.0000"
+    }
+  ]
+}
+```
+
+#### Success Response (201 Created)
+```json
+{
+  "id": 1,
+  "transfer_number": "TRF-20260926-0001",
+  "source_location_id": 1,
+  "source_location_name": "Storage Dock A",
+  "source_warehouse_id": 1,
+  "source_warehouse_name": "Main Warehouse",
+  "destination_location_id": 2,
+  "destination_location_name": "Storage Dock B",
+  "destination_warehouse_id": 2,
+  "destination_warehouse_name": "Secondary Warehouse",
+  "status": "DRAFT",
+  "created_by": 1,
+  "created_at": "2026-09-26T15:00:00Z",
+  "updated_at": "2026-09-26T15:00:00Z",
+  "items": [
+    {
+      "id": 1,
+      "transfer_id": 1,
+      "product_id": 1,
+      "product_name": "Steel Rods",
+      "sku": "STEEL-001",
+      "quantity": "15.0000"
+    }
+  ]
+}
+```
+
+---
+
+### 2. List Transfers
+Lists transfers ordered by newest first.
+
+- **URL:** `/api/transfers`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+- **Query Parameters:**
+  - `status`: Filter by status (`DRAFT`, `WAITING`, `IN_TRANSIT`, `DONE`, `CANCELED`)
+  - `source_location_id`: Filter by source location ID
+  - `destination_location_id`: Filter by destination location ID
+  - `source_warehouse_id`: Filter by source warehouse ID
+  - `destination_warehouse_id`: Filter by destination warehouse ID
+  - `search`: Substring search on `transfer_number`
+  - `created_by`: Filter by creator user ID
+
+---
+
+### 3. Get Transfer Detail
+Retrieves full details of a transfer by ID.
+
+- **URL:** `/api/transfers/{transfer_id}`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+
+---
+
+### 4. Update Transfer (Pre-Terminal)
+Updates source location, destination location, operational status, or item lines of a pre-terminal transfer.
+
+- **URL:** `/api/transfers/{transfer_id}`
+- **Method:** `PATCH`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Operational Rules:
+- Status transitions via PATCH: `DRAFT` $\rightarrow$ `WAITING` / `IN_TRANSIT`; `WAITING` $\rightarrow$ `IN_TRANSIT`.
+- Direct status update to `DONE` or `CANCELED` via `PATCH` is rejected. Use `/validate` or `/cancel`.
+- `DONE` and `CANCELED` documents cannot be updated.
+
+---
+
+### 5. Validate Transfer
+Validates an `IN_TRANSIT` transfer and executes stock movements via `InventoryService.transfer_stock` inside a single database transaction.
+
+- **URL:** `/api/transfers/{transfer_id}/validate`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Transaction & Idempotency Behavior:
+1. Loads Transfer row with PostgreSQL-safe row-level lock (`SELECT ... FOR UPDATE`).
+2. Verifies `status == IN_TRANSIT`. If not `IN_TRANSIT`, returns `400 Bad Request`.
+3. Validates source and destination locations, parent warehouses, and all line products are active.
+4. Ensures source location $\neq$ destination location.
+5. For each item line, invokes `InventoryService.transfer_stock(...)`:
+   - Decreases source location physical stock.
+   - Increases destination location physical stock (creates Inventory row if absent).
+   - Records single `TRANSFER` stock ledger entry detailing source and destination locations.
+6. Updates transfer status to `DONE`.
+7. Commits transaction once. On insufficient stock or validation failure, complete rollback occurs (stock levels unchanged, no ledger created, transfer remains `IN_TRANSIT`).
+
+---
+
+### 6. Cancel Transfer
+Cancels a pre-DONE transfer document (`DRAFT`, `WAITING`, `IN_TRANSIT`).
+
+- **URL:** `/api/transfers/{transfer_id}/cancel`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Behavior:
+- Updates status to `CANCELED`.
+- Does not change inventory stock or create stock ledger records.
+- If transfer is already `DONE` or `CANCELED`, returns `400 Bad Request`.
+
+
 
 

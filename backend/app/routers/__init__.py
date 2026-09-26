@@ -6,6 +6,7 @@ from app.routers.inventory import router as inventory_router
 from app.routers.locations import router as locations_router
 from app.routers.products import router as products_router
 from app.routers.receipts import router as receipts_router
+from app.routers.transfers import router as transfers_router
 from app.routers.warehouses import router as warehouses_router
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "inventory_router",
     "receipts_router",
     "deliveries_router",
+    "transfers_router",
 ]

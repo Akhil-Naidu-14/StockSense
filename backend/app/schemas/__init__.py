@@ -42,6 +42,18 @@ from app.schemas.receipt import (
     ReceiptResponse,
     ReceiptUpdate,
 )
+from app.schemas.adjustment import (
+    AdjustmentCreate,
+    AdjustmentResponse,
+    AdjustmentUpdate,
+)
+from app.schemas.transfer import (
+    TransferCreate,
+    TransferItemCreate,
+    TransferItemResponse,
+    TransferResponse,
+    TransferUpdate,
+)
 from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseResponse,
@@ -84,4 +96,12 @@ __all__ = [
     "DeliveryItemCreate",
     "DeliveryItemResponse",
     "DeliveryResponse",
+    "TransferCreate",
+    "TransferUpdate",
+    "TransferItemCreate",
+    "TransferItemResponse",
+    "TransferResponse",
+    "AdjustmentCreate",
+    "AdjustmentUpdate",
+    "AdjustmentResponse",
 ]
