@@ -1,9 +1,11 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Package, Warehouse, PackagePlus, Truck,
   ArrowLeftRight, SlidersHorizontal, History, BookOpen, User,
   LogOut, Boxes, ChevronLeft, ChevronRight,
 } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
+import { logout } from '../../services/authService'
 
 const NAV_GROUPS = [
   {
@@ -15,24 +17,24 @@ const NAV_GROUPS = [
   {
     label: 'Inventory',
     items: [
-      { to: '/products', icon: Package, label: 'Products' },
-      { to: '/warehouses', icon: Warehouse, label: 'Warehouses' },
+      { to: '/products',   icon: Package,   label: 'Products' },
+      { to: '/warehouses', icon: Warehouse,  label: 'Warehouses' },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { to: '/receipts', icon: PackagePlus, label: 'Receipts' },
-      { to: '/deliveries', icon: Truck, label: 'Deliveries' },
-      { to: '/transfers', icon: ArrowLeftRight, label: 'Transfers' },
+      { to: '/receipts',    icon: PackagePlus,      label: 'Receipts' },
+      { to: '/deliveries',  icon: Truck,             label: 'Deliveries' },
+      { to: '/transfers',   icon: ArrowLeftRight,    label: 'Transfers' },
       { to: '/adjustments', icon: SlidersHorizontal, label: 'Adjustments' },
     ],
   },
   {
     label: 'Reports',
     items: [
-      { to: '/move-history', icon: History, label: 'Move History' },
-      { to: '/stock-ledger', icon: BookOpen, label: 'Stock Ledger' },
+      { to: '/move-history',  icon: History,  label: 'Move History' },
+      { to: '/stock-ledger',  icon: BookOpen, label: 'Stock Ledger' },
     ],
   },
   {
@@ -46,9 +48,13 @@ const NAV_GROUPS = [
 export default function Sidebar({ open, setOpen }) {
   const navigate = useNavigate()
 
-  const handleLogout = () => {
-    localStorage.removeItem('stocksense_auth')
-    navigate('/login')
+  const handleLogout = async () => {
+    try {
+      await logout()      // calls POST /auth/logout then clears local storage
+    } catch {
+      // Even if the server call fails, local creds are already cleared by authService
+    }
+    navigate('/login', { replace: true })
   }
 
   return (

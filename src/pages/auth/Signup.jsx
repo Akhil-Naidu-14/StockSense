@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Boxes, Eye, EyeOff } from 'lucide-react'
+import { signup, getApiError } from '../../services/authService'
 
 export default function Signup() {
   const navigate = useNavigate()
@@ -8,8 +9,9 @@ export default function Signup() {
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     if (!form.name || !form.email || !form.password || !form.confirm) {
@@ -21,13 +23,15 @@ export default function Signup() {
       return
     }
     setLoading(true)
-    setTimeout(() => {
-      localStorage.setItem('stocksense_auth', 'mock_token')
-      navigate('/dashboard')
-    }, 800)
+    try {
+      await signup({ name: form.name, email: form.email, password: form.password })
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      setError(getApiError(err))
+    } finally {
+      setLoading(false)
+    }
   }
-
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
@@ -48,7 +52,8 @@ export default function Signup() {
                 type="text"
                 value={form.name}
                 onChange={set('name')}
-                placeholder="Ashish Kumar"
+                placeholder="Your full name"
+                autoComplete="name"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -59,7 +64,8 @@ export default function Signup() {
                 type="email"
                 value={form.email}
                 onChange={set('email')}
-                placeholder="ashish@stocksense.io"
+                placeholder="you@example.com"
+                autoComplete="email"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -72,6 +78,7 @@ export default function Signup() {
                   value={form.password}
                   onChange={set('password')}
                   placeholder="Min 8 characters"
+                  autoComplete="new-password"
                   className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
@@ -91,19 +98,25 @@ export default function Signup() {
                 value={form.confirm}
                 onChange={set('confirm')}
                 placeholder="Repeat password"
+                autoComplete="new-password"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+                {error}
+              </div>
             )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60"
+              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center justify-center gap-2"
             >
+              {loading && (
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
               {loading ? 'Creating account…' : 'Create Account'}
             </button>
           </form>

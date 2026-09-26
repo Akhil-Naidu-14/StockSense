@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Boxes, Eye, EyeOff } from 'lucide-react'
+import { login, getApiError } from '../../services/authService'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -9,7 +10,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     if (!form.email || !form.password) {
@@ -17,11 +18,14 @@ export default function Login() {
       return
     }
     setLoading(true)
-    // Mock auth – accept any credentials
-    setTimeout(() => {
-      localStorage.setItem('stocksense_auth', 'mock_token')
-      navigate('/dashboard')
-    }, 800)
+    try {
+      await login({ email: form.email, password: form.password })
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      setError(getApiError(err))
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -44,19 +48,26 @@ export default function Login() {
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="ashish@stocksense.io"
+                placeholder="you@example.com"
+                autoComplete="email"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">Password</label>
+                <Link to="/forgot-password" className="text-xs text-blue-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
               <div className="relative">
                 <input
                   type={showPwd ? 'text' : 'password'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder="Enter your password"
+                  autoComplete="current-password"
                   className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
@@ -70,14 +81,19 @@ export default function Login() {
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+                {error}
+              </div>
             )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && (
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
@@ -88,11 +104,6 @@ export default function Login() {
               Sign up
             </Link>
           </p>
-
-          {/* Demo hint */}
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-            <p className="text-xs text-blue-700 font-medium">Demo: any email + password works</p>
-          </div>
         </div>
       </div>
     </div>
