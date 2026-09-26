@@ -5,27 +5,54 @@ import { signup, getApiError } from '../../services/authService'
 
 export default function Signup() {
   const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    role: 'WAREHOUSE_STAFF',
+    password: '',
+    confirm: '',
+  })
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const set = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (!form.name || !form.email || !form.password || !form.confirm) {
-      setError('Please fill in all fields.')
+    setSuccess('')
+
+    if (!form.name.trim() || !form.email.trim() || !form.role || !form.password || !form.confirm) {
+      setError('Please fill in all required fields.')
       return
     }
     if (form.password !== form.confirm) {
       setError('Passwords do not match.')
       return
     }
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters.')
+      return
+    }
+
     setLoading(true)
     try {
-      await signup({ name: form.name, email: form.email, password: form.password })
-      navigate('/dashboard', { replace: true })
+      await signup({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || undefined,
+        role: form.role,
+        password: form.password,
+      })
+      setSuccess('Account created successfully! Redirecting to sign in…')
+      setTimeout(() => {
+        navigate('/login', {
+          replace: true,
+          state: { message: 'Account created successfully! Please sign in with your credentials.' },
+        })
+      }, 1200)
     } catch (err) {
       setError(getApiError(err))
     } finally {
@@ -45,33 +72,70 @@ export default function Signup() {
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Create an account</h2>
           <p className="text-sm text-gray-500 mb-6">Start managing your inventory today</p>
 
+          {success && (
+            <div className="mb-4 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg font-medium">
+              ✓ {success}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
               <input
                 type="text"
                 value={form.name}
                 onChange={set('name')}
                 placeholder="Your full name"
                 autoComplete="name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={loading}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
               <input
                 type="email"
                 value={form.email}
                 onChange={set('email')}
                 placeholder="you@example.com"
                 autoComplete="email"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={loading}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <input
+                type="tel"
+                value={form.phone}
+                onChange={set('phone')}
+                placeholder="+91 9876543210"
+                autoComplete="tel"
+                disabled={loading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+              <select
+                value={form.role}
+                onChange={set('role')}
+                disabled={loading}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 bg-white"
+              >
+                <option value="WAREHOUSE_STAFF">Warehouse Staff</option>
+                <option value="INVENTORY_MANAGER">Inventory Manager</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
               <div className="relative">
                 <input
                   type={showPwd ? 'text' : 'password'}
@@ -79,12 +143,14 @@ export default function Signup() {
                   onChange={set('password')}
                   placeholder="Min 8 characters"
                   autoComplete="new-password"
-                  className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={loading}
+                  required
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPwd((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -92,14 +158,16 @@ export default function Signup() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password *</label>
               <input
                 type="password"
                 value={form.confirm}
                 onChange={set('confirm')}
                 placeholder="Repeat password"
                 autoComplete="new-password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={loading}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
             </div>
 

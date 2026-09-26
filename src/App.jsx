@@ -7,6 +7,7 @@ import VerifyOTP from './pages/auth/VerifyOTP'
 import ResetPassword from './pages/auth/ResetPassword'
 import Dashboard from './pages/Dashboard'
 import Products from './pages/products/Products'
+import CreateProduct from './pages/products/CreateProduct'
 import ProductDetails from './pages/products/ProductDetails'
 import Receipts from './pages/receipts/Receipts'
 import CreateReceipt from './pages/receipts/CreateReceipt'
@@ -22,6 +23,7 @@ import CreateAdjustment from './pages/adjustments/CreateAdjustment'
 import MoveHistory from './pages/MoveHistory'
 import StockLedger from './pages/StockLedger'
 import Warehouses from './pages/Warehouses'
+import CreateWarehouse from './pages/warehouses/CreateWarehouse'
 import Profile from './pages/Profile'
 import { getToken } from './services/api'
 
@@ -59,6 +61,7 @@ export default function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard"          element={<Dashboard />} />
         <Route path="products"           element={<Products />} />
+        <Route path="products/create"    element={<CreateProduct />} />
         <Route path="products/:id"       element={<ProductDetails />} />
         <Route path="receipts"           element={<Receipts />} />
         <Route path="receipts/create"    element={<CreateReceipt />} />
@@ -74,6 +77,7 @@ export default function App() {
         <Route path="move-history"       element={<MoveHistory />} />
         <Route path="stock-ledger"       element={<StockLedger />} />
         <Route path="warehouses"         element={<Warehouses />} />
+        <Route path="warehouses/create"  element={<CreateWarehouse />} />
         <Route path="profile"            element={<Profile />} />
       </Route>
 
