@@ -266,3 +266,43 @@ Resets user password using the short-lived password reset token.
 - **GET `/api/inventory`**: Query read-only stock availability across products, locations, and warehouses (Authenticated).
   Query params: `?warehouse_id=1`, `?location_id=1`, `?product_id=1`, `?category_id=1`, `?low_stock=true`, `?out_of_stock=true`.
 - **GET `/api/inventory/{product_id}/locations`**: Query location-by-location inventory for a product (Authenticated).
+
+---
+
+## Centralized Inventory Service Architecture (`app.services.InventoryService`)
+
+### Architectural Overview
+All stock-changing operations in StockSense must execute exclusively through `InventoryService` (`backend/app/services/inventory_service.py`).
+Routers and business document workflows (Receipts, Deliveries, Transfers, Adjustments) MUST NOT independently compute or update inventory quantities or write stock ledger entries.
+
+### Key Operational Rules & Semantics
+
+1. **Transaction & Unit of Work Strategy**:
+   - `InventoryService` methods accept an active SQLAlchemy `Session` (`db`), mutate model entities, and perform `db.flush()` to ensure IDs and state changes are visible within the session.
+   - `InventoryService` DOES NOT call `db.commit()`. This allows caller workflows (e.g. approving a Receipt or Delivery document) to combine document status updates, inventory quantity changes, and stock ledger generation in a single atomic database transaction.
+
+2. **Decimal & Precision Handling**:
+   - All stock quantities (`quantity`, `reserved_quantity`, `quantity_before`, `quantity_change`, `quantity_after`) use `Decimal` with strict `Numeric(12, 4)` quantization. Floating-point arithmetic is strictly prohibited.
+   - `increase_stock`, `decrease_stock`, and `transfer_stock` require strictly positive quantities (`quantity > 0`).
+   - `adjust_stock` requires non-negative counted quantities (`counted_quantity >= 0`).
+
+3. **Available Stock & Safety Guards**:
+   - `available_quantity` is defined deterministically as:
+     $$\text{available\_quantity} = \text{quantity} - \text{reserved\_quantity}$$
+   - Stock decreases and transfers validate requested quantities against `available_quantity`. Operations that would cause available physical stock to drop below zero are rejected immediately with domain exception `InsufficientStockError`.
+   - Operations that fail or throw domain exceptions perform no mutation and generate no ledger entries.
+
+4. **Transfer Ledger Semantics**:
+   - `transfer_stock` decreases source location stock and increases destination location stock in a single atomic operation, preserving total company-wide stock.
+   - Transfers generate a single `StockLedger` entry with `transaction_type = TRANSFER`, capturing `source_location_id`, `destination_location_id`, source `quantity_before`, transferred `quantity_change`, and source `quantity_after`.
+
+5. **Adjustment Semantics**:
+   - `adjust_stock` accepts a physical count (`counted_quantity`) and computes:
+     $$\text{quantity\_change} = \text{counted\_quantity} - \text{system\_quantity}$$
+   - Adjustments verify that `counted_quantity >= reserved_quantity`. Adjustments attempting to set physical stock below reserved quantities raise `InvalidAdjustmentError`.
+
+6. **Low-Stock Evaluation**:
+   - Low-stock and out-of-stock evaluations (`check_low_stock`) check location-specific `ReorderRule` records first, then product-wide `ReorderRule` records, falling back to `Product.reorder_level`.
+   - Low Stock Condition: $\text{available\_quantity} \le \text{reorder\_level}$
+   - Out of Stock Condition: $\text{available\_quantity} \le 0$
+
