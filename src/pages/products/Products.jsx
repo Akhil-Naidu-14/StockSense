@@ -1,20 +1,59 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import PageHeader from '../../components/ui/PageHeader'
 import SearchBar from '../../components/ui/SearchBar'
-import StatusBadge from '../../components/ui/StatusBadge'
 import StockBadge from '../../components/ui/StockBadge'
 import EmptyState from '../../components/ui/EmptyState'
 import { mockProducts, formatDate } from '../../data/mockData'
+import { getProducts } from '../../services/productService'
 
 const CATEGORIES = ['All', 'Raw Materials', 'Electrical', 'Plumbing', 'Fasteners']
 
 export default function Products() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
+  const [backendProducts, setBackendProducts] = useState([])
+  const [infoMsg, setInfoMsg] = useState(location.state?.message || '')
 
-  const filtered = mockProducts.filter((p) => {
+  // Fetch product list from backend API
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const data = await getProducts()
+        if (active && Array.isArray(data)) {
+          setBackendProducts(data)
+        }
+      } catch {
+        // Quiet fallback to mock products if endpoint errors or returns empty
+      }
+    })()
+    return () => { active = false }
+  }, [location.state])
+
+  // Combine backend products with mock data (avoiding duplicate SKUs)
+  const backendSkus = new Set(backendProducts.map((bp) => bp.sku.toUpperCase()))
+  const mockFiltered = mockProducts.filter((mp) => !backendSkus.has(mp.sku.toUpperCase()))
+
+  const formattedBackendProducts = backendProducts.map((bp) => ({
+    id: String(bp.id),
+    sku: bp.sku,
+    name: bp.name,
+    category: bp.category_name || (bp.category_id ? `Category #${bp.category_id}` : 'General'),
+    unit: bp.unit_of_measure || 'pcs',
+    totalStock: 0,
+    reorderPoint: Number(bp.reorder_level || 0),
+    maxStock: 500,
+    minStock: 10,
+    status: bp.is_active ? 'active' : 'inactive',
+    updatedAt: bp.updated_at || bp.created_at || new Date().toISOString(),
+  }))
+
+  const allProducts = [...formattedBackendProducts, ...mockFiltered]
+
+  const filtered = allProducts.filter((p) => {
     const matchSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase())
@@ -26,9 +65,16 @@ export default function Products() {
     <div>
       <PageHeader
         title="Products"
-        subtitle={`${mockProducts.length} total products`}
-        action={{ label: 'Add Product', onClick: () => {} }}
+        subtitle={`${allProducts.length} total products`}
+        action={{ label: 'Add Product', onClick: () => navigate('/products/create') }}
       />
+
+      {infoMsg && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 font-medium flex justify-between items-center">
+          <span>✓ {infoMsg}</span>
+          <button onClick={() => setInfoMsg('')} className="text-green-700 hover:text-green-900 text-xs">✕</button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">

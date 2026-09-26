@@ -1,18 +1,21 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Boxes, Eye, EyeOff } from 'lucide-react'
 import { login, getApiError } from '../../services/authService'
 
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
+  const [infoMsg, setInfoMsg] = useState(location.state?.message || '')
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setInfoMsg('')
     if (!form.email || !form.password) {
       setError('Please fill in all fields.')
       return
@@ -40,6 +43,12 @@ export default function Login() {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome back</h2>
           <p className="text-sm text-gray-500 mb-6">Sign in to your account to continue</p>
+
+          {infoMsg && (
+            <div className="mb-4 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg font-medium">
+              ✓ {infoMsg}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

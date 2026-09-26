@@ -1,18 +1,68 @@
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import PageHeader from '../components/ui/PageHeader'
 import { mockWarehouses } from '../data/mockData'
 import { Warehouse, Users, MapPin } from 'lucide-react'
+import { getWarehouses } from '../services/warehouseService'
 
 export default function Warehouses() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [backendWarehouses, setBackendWarehouses] = useState([])
+  const [infoMsg, setInfoMsg] = useState(location.state?.message || '')
+
+  // Fetch warehouse list from backend API
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const data = await getWarehouses()
+        if (active && Array.isArray(data)) {
+          setBackendWarehouses(data)
+        }
+      } catch {
+        // Quiet fallback to mock warehouses if endpoint errors or returns empty
+      }
+    })()
+    return () => { active = false }
+  }, [location.state])
+
+  // Combine backend warehouses with mock data (avoiding duplicate codes)
+  const backendCodes = new Set(backendWarehouses.map((bw) => bw.code.toUpperCase()))
+  const mockFiltered = mockWarehouses.filter((mw) => !backendCodes.has(mw.code.toUpperCase()))
+
+  const formattedBackendWarehouses = backendWarehouses.map((bw) => ({
+    id: String(bw.id),
+    name: bw.name,
+    code: bw.code,
+    location: bw.address || 'Location Not Specified',
+    capacity: 5000,
+    unit: 'kg',
+    usedCapacity: 0,
+    manager: bw.manager_name || 'Unassigned',
+    status: bw.is_active ? 'active' : 'inactive',
+    productCount: 0,
+  }))
+
+  const allWarehouses = [...formattedBackendWarehouses, ...mockFiltered]
+
   return (
     <div>
       <PageHeader
         title="Warehouses"
-        subtitle={`${mockWarehouses.length} active locations`}
-        action={{ label: 'Add Warehouse', onClick: () => {} }}
+        subtitle={`${allWarehouses.length} active locations`}
+        action={{ label: 'Add Warehouse', onClick: () => navigate('/warehouses/create') }}
       />
 
+      {infoMsg && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 font-medium flex justify-between items-center">
+          <span>✓ {infoMsg}</span>
+          <button onClick={() => setInfoMsg('')} className="text-green-700 hover:text-green-900 text-xs">✕</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {mockWarehouses.map((w) => {
+        {allWarehouses.map((w) => {
           const pct = Math.round((w.usedCapacity / w.capacity) * 100)
           const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-400' : 'bg-blue-500'
 
