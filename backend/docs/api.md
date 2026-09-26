@@ -487,4 +487,174 @@ Cancels a `DRAFT` receipt.
 - Does not change inventory stock or create stock ledger records.
 - If receipt is already `DONE` or `CANCELED`, returns `400 Bad Request`.
 
+---
+
+## Deliveries / Outgoing Stock (`/api/deliveries`)
+
+### Overview & Delivery Lifecycle
+Deliveries handle outgoing inventory movements from a source location.
+Supported statuses: `DRAFT`, `WAITING`, `READY`, `PICKED`, `PACKED`, `DONE`, `CANCELED`.
+
+- **Stock Mutation Policy:** DRAFT, WAITING, READY, PICKED, and PACKED status documents do NOT mutate inventory stock or create `StockLedger` entries.
+- **Reservation Policy:** Deliveries do not create or own inventory reservations in this iteration. Final validation checks available physical stock (`available = quantity - reserved_quantity`).
+- **Validation:** `POST /api/deliveries/{id}/validate` atomically decreases stock via `InventoryService.decrease_stock()` using row locking (`SELECT ... FOR UPDATE`), transitions status to `DONE`, and generates negative `DELIVERY` stock ledger records.
+- **Immutability:** `DONE` and `CANCELED` states are terminal and immutable.
+
+### Operational Roles
+Both `INVENTORY_MANAGER` and `WAREHOUSE_STAFF` roles can create, update, validate, and cancel delivery documents.
+
+---
+
+### 1. Create Delivery
+Creates a new delivery document in `DRAFT` status.
+
+- **URL:** `/api/deliveries`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Request Body
+```json
+{
+  "customer_reference": "PO-98765",
+  "location_id": 1,
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": "25.5000"
+    }
+  ]
+}
+```
+
+#### Success Response (201 Created)
+```json
+{
+  "id": 1,
+  "delivery_number": "DLV-20260926-0001",
+  "customer_reference": "PO-98765",
+  "location_id": 1,
+  "location_name": "Dispatch Dock A",
+  "warehouse_id": 1,
+  "warehouse_name": "Central Hub",
+  "status": "DRAFT",
+  "created_by": 1,
+  "created_at": "2026-09-26T14:00:00Z",
+  "updated_at": "2026-09-26T14:00:00Z",
+  "items": [
+    {
+      "id": 1,
+      "delivery_id": 1,
+      "product_id": 1,
+      "product_name": "Steel Rods",
+      "sku": "STEEL-001",
+      "quantity": "25.5000"
+    }
+  ]
+}
+```
+
+---
+
+### 2. List Deliveries
+Lists deliveries ordered by newest first.
+
+- **URL:** `/api/deliveries`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+- **Query Parameters:**
+  - `status`: Filter by status (`DRAFT`, `WAITING`, `READY`, `PICKED`, `PACKED`, `DONE`, `CANCELED`)
+  - `location_id`: Filter by source location ID
+  - `warehouse_id`: Filter by warehouse ID
+  - `customer_reference`: Case-insensitive substring match on customer reference
+  - `search`: Substring search on `delivery_number` or `customer_reference`
+  - `created_by`: Filter by creator user ID
+
+#### Success Response (200 OK)
+```json
+[
+  {
+    "id": 1,
+    "delivery_number": "DLV-20260926-0001",
+    "customer_reference": "PO-98765",
+    "location_id": 1,
+    "location_name": "Dispatch Dock A",
+    "warehouse_id": 1,
+    "warehouse_name": "Central Hub",
+    "status": "DRAFT",
+    "created_by": 1,
+    "created_at": "2026-09-26T14:00:00Z",
+    "updated_at": "2026-09-26T14:00:00Z",
+    "items": [
+      {
+        "id": 1,
+        "delivery_id": 1,
+        "product_id": 1,
+        "product_name": "Steel Rods",
+        "sku": "STEEL-001",
+        "quantity": "25.5000"
+      }
+    ]
+  }
+]
+```
+
+---
+
+### 3. Get Delivery Detail
+Retrieves full details of a delivery by ID.
+
+- **URL:** `/api/deliveries/{delivery_id}`
+- **Method:** `GET`
+- **Authentication:** Bearer Token required
+
+---
+
+### 4. Update Delivery (Pre-Terminal)
+Updates customer reference, location, operational status, or item lines of a pre-terminal delivery.
+
+- **URL:** `/api/deliveries/{delivery_id}`
+- **Method:** `PATCH`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Operational Rules:
+- Direct status update to `DONE` or `CANCELED` via `PATCH` is rejected. Use `/validate` or `/cancel`.
+- `DONE` and `CANCELED` documents cannot be updated.
+
+---
+
+### 5. Validate Delivery
+Validates a pre-terminal delivery and executes stock deductions via `InventoryService.decrease_stock` inside a single database transaction.
+
+- **URL:** `/api/deliveries/{delivery_id}/validate`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Transaction & Idempotency Behavior:
+1. Loads Delivery row with PostgreSQL-safe row-level lock (`SELECT ... FOR UPDATE`).
+2. Verifies status allows final validation. If already `DONE` or `CANCELED`, returns `400 Bad Request`.
+3. Validates source location, warehouse, and all line products are active.
+4. For each item line, invokes `InventoryService.decrease_stock(...)`:
+   - Checks available stock: `available = quantity - reserved_quantity`.
+   - `transaction_type`: `DELIVERY`
+   - `reference_id`: `str(delivery.id)`
+   - `performed_by`: authenticated `current_user.id`
+   - `quantity_change`: `-item.quantity`
+5. Updates delivery status to `DONE`.
+6. Commits transaction once. On insufficient stock or validation failure, complete rollback occurs (stock unchanged, no ledger created, delivery remains non-DONE).
+
+---
+
+### 6. Cancel Delivery
+Cancels a pre-DONE delivery document.
+
+- **URL:** `/api/deliveries/{delivery_id}/cancel`
+- **Method:** `POST`
+- **Authentication:** Bearer Token required (`INVENTORY_MANAGER`, `WAREHOUSE_STAFF`)
+
+#### Behavior:
+- Updates status to `CANCELED`.
+- Does not change inventory stock or create stock ledger records.
+- If delivery is already `DONE` or `CANCELED`, returns `400 Bad Request`.
+
+
 

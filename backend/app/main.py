@@ -7,6 +7,7 @@ from app.database import Base, engine
 from app.routers import (
     auth_router,
     categories_router,
+    deliveries_router,
     health_router,
     inventory_router,
     locations_router,
@@ -61,6 +62,7 @@ app.include_router(locations_router)
 app.include_router(products_router)
 app.include_router(inventory_router)
 app.include_router(receipts_router)
+app.include_router(deliveries_router)
 
 
 @app.get("/")
